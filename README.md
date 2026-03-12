@@ -35,7 +35,7 @@ Unlike basic linear chatbots, this system utilizes a **cyclic state machine** wh
 ---
 
 ## 🖥️ Pro Dashboard
-![Dashboard Preview](assets/dashboard_preview.PNG)
+![Dashboard Preview](assets/dashboard%20preview.png)
 *Real-time visualization of the agentic state machine, featuring deep-key data mapping and RAG-grounded outputs.*
 
 ---
@@ -44,7 +44,7 @@ Unlike basic linear chatbots, this system utilizes a **cyclic state machine** wh
 
 The system follows a stateful directed graph workflow to ensure predictable transitions and reliable software engineering.
 
-![Agentic Workflow Diagram](assets/agent-workflow-diagram.png)
+![Agentic Workflow Diagram](assets/agent%20workflow%20diagram.png)
 
 1. **Intake (User Proxy):** Clarifies user requirements and detects project intent.
 2. **Design (Architect + RAG):** Retrieves relevant documentation and creates a structural blueprint.
@@ -52,7 +52,7 @@ The system follows a stateful directed graph workflow to ensure predictable tran
 4. **Review (Reviewer):** Performs automated code review for bugs, security, and style.
 5. **Coach (Teacher):** Synthesizes the technical journey into an educational walkthrough.
 
-![AI Code Generation](assets/ai-code-generation.PNG)
+![AI Code Generation](assets/ai%20code%20generation.png)
 *Example of the AI Coder agent generating production-ready code based on architectural blueprints.*
 
 ---
