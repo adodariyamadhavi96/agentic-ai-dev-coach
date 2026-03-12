@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Developer Coach | Pro Dashboard</title>
+    
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script src="https://unpkg.com/marked/marked.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&family=Fira+Code&display=swap" rel="stylesheet" />
+
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #060910; color: #e2e8f0; margin: 0; overflow-x: hidden; }
+        .glass { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(12px); }
+        .agent-active { border-color: #06b6d4; box-shadow: 0 0 25px rgba(6, 182, 212, 0.2); background: rgba(6, 182, 212, 0.08); transform: scale(1.05); }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        code { font-family: 'Fira Code', monospace !important; }
+        .text-glow { text-shadow: 0 0 10px rgba(6, 182, 212, 0.5); }
+        
+        /* FIX: Ensures Markdown text is actually visible (not black-on-black) */
+        .prose { 
+            color: #e2e8f0 !important; /* Forces text to be Off-White */
+            max-width: none !important; 
+        }
+        .prose strong, .prose h3 { 
+            color: #22d3ee !important; /* Forces headers to be Cyan */
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useRef } = React;
+
+        const AGENTS = [
+            { id: "user_proxy", label: "Intake", icon: "📥" },
+            { id: "architect", label: "Design", icon: "🏗️" },
+            { id: "coder", label: "Code", icon: "💻" },
+            { id: "reviewer", label: "Review", icon: "🛡️" },
+            { id: "teacher", label: "Coach", icon: "🎓" }
+        ];
+
+        function App() {
+            const [query, setQuery] = useState("");
+            const [status, setStatus] = useState("idle");
+            const [activeAgent, setActiveAgent] = useState(null);
+            const [result, setResult] = useState(null);
+            const [expertise, setExpertise] = useState("Intermediate");
+            const [history, setHistory] = useState([]);
+            const [showHistory, setShowHistory] = useState(false);
+            const [sidePanelHeight, setSidePanelHeight] = useState(null);
+            const codePanelRef = useRef(null);
+            const [showFullSummary, setShowFullSummary] = useState(false);
+
+            const downloadZip = useCallback(async () => {
+                try {
+                    const res = await fetch("http://localhost:8000/api/download");
+                    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "project.zip";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    console.error(e);
+                    alert("Download failed. Make sure the backend is running and a result exists.");
+                }
+            }, []);
+
+            const renderMarkdown = (text) => {
+                const str = text != null ? String(text).trim() : "";
+                if (!str) return { __html: "" };
+                try {
+                    if (window.marked && typeof window.marked.parse === "function") {
+                        const html = window.marked.parse(str);
+                        if (html && html.trim()) return { __html: html };
+                    }
+                } catch (e) { console.warn("marked parse error:", e); }
+                // Fallback: show plain text so content is never invisible
+                const escaped = str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+                return { __html: "<div class=\"whitespace-pre-wrap\">" + escaped.replace(/\n/g, "<br/>") + "</div>" };
+            };
+
+            // --- FIXED LOGIC: HANDLE { query, result }, { final_response }, OR FLAT SHAPE + DEEP KEY SEARCH ---
+            const mapDataToUI = (rawData) => {
+                console.log("Mapping Logic Input (/api/ask or history):", rawData);
+
+                // Unwrap: saved files use { query, result }; workflow can return final_response or flat payload
+                let data = rawData;
+                if (data && typeof data === "object") {
+                    if (data.result != null) data = data.result;
+                    else if (data.final_response != null) data = data.final_response;
+                }
+                
+                // This helper scans the JSON regardless of how deep the backend hides the text
+                const findValue = (obj, key) => {
+                    if (!obj || typeof obj !== 'object') return null;
+                    if (obj[key] !== undefined && obj[key] !== null) return obj[key];
+                    for (const k in obj) {
+                        const found = findValue(obj[k], key);
+                        if (found) return found;
+                    }
+                    return null;
+                };
+
+                const architecturePlan = findValue(data, "architecture_plan") || "Plan not found in response.";
+                const summaryText = findValue(data, "summary") || "";
+                const fullExplanation = findValue(data, "full_explanation") || findValue(data, "explanation") || summaryText || "Coach details not found.";
+                const finalCode = findValue(data, "final_code") || findValue(data, "generated_code") || findValue(data, "code") || "";
+                const codeLanguage = findValue(data, "code_language") || "python";
+                const reviewScore = findValue(data, "review_score") || 0;
+
+                console.log("Mapped fields:", {
+                    architecture_plan: architecturePlan,
+                    full_explanation: fullExplanation?.slice(0, 80),
+                    final_code_preview: finalCode?.slice(0, 80),
+                    code_language: codeLanguage,
+                    review_score: reviewScore
+                });
+
+                setResult({
+                    summary: summaryText,
+                    architecture_plan: architecturePlan,
+                    full_explanation: fullExplanation,
+                    final_code: finalCode,
+                    code_language: codeLanguage,
+                    review_score: reviewScore
+                });
+                setShowFullSummary(false);
+            };
+
+            const fetchResult = useCallback(async () => {
+                try {
+                    const res = await fetch("http://localhost:8000/api/ask", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ user_query: query, difficulty_level: expertise })
+                    });
+                    const data = await res.json();
+                    mapDataToUI(data); 
+                    setStatus("complete");
+                    fetchHistoryList(); // Preserved your history refresh
+                } catch (err) {
+                    console.error("Fetch error:", err);
+                    setStatus("idle");
+                }
+            }, [query, expertise]);
+
+            // --- PRESERVED HISTORY FUNCTIONS ---
+            const fetchHistoryList = async () => {
+                try {
+                    const res = await fetch("http://localhost:8000/api/history");
+                    const data = await res.json();
+                    setHistory(Array.isArray(data) ? data : []);
+                } catch (e) { console.warn("History service offline"); }
+            };
+
+            const loadFromHistory = async (filename) => {
+                try {
+                    const res = await fetch(`http://localhost:8000/api/history/${filename}`);
+                    const data = await res.json();
+                    mapDataToUI(data);
+                    setQuery(data.query || "");
+                    setStatus("complete");
+                    setShowHistory(false);
+                } catch (err) { console.error("History Load Error:", err); }
+            };
+
+            const QUICK_STARTS = [
+                {
+                    title: "Build a CRUD API",
+                    desc: "FastAPI + validation + tests",
+                    prompt:
+                        "Build a FastAPI CRUD service for a Todo app with SQLite. Include Pydantic validation, repository layer, and unit tests. Provide architecture plan + final code."
+                },
+                {
+                    title: "Design a React feature",
+                    desc: "State, components, test plan",
+                    prompt:
+                        "Design and implement a React feature: user settings page with dark mode toggle and persisted preferences. Include architecture plan, component structure, and test plan."
+                },
+                {
+                    title: "Refactor for quality",
+                    desc: "Clean architecture + review",
+                    prompt:
+                        "Refactor my Python script into clean modules with typed functions, error handling, and unit tests. Include architecture plan, final code, and reviewer notes."
+                },
+                {
+                    title: "System design",
+                    desc: "RAG + agents + scaling",
+                    prompt:
+                        "Propose an architecture for a multi-agent RAG system: ingestion, vector store, retrieval, tool calling, caching, and observability. Include tradeoffs and deployment plan."
+                }
+            ];
+
+            const applyQuickStart = (text) => {
+                setQuery(text);
+                setStatus("idle");
+                setResult(null);
+                setActiveAgent(null);
+            };
+
+            const handleSubmit = () => {
+                if (!query.trim()) return;
+                setStatus("thinking");
+                setResult(null);
+                setActiveAgent(null);
+
+                const es = new EventSource(`http://localhost:8000/api/stream?query=${encodeURIComponent(query)}`);
+                es.onmessage = (e) => {
+                    const data = JSON.parse(e.data);
+                    if (data.agent) setActiveAgent(data.agent);
+                    if (data.agent === "teacher") {
+                        es.close();
+                        setTimeout(fetchResult, 800);
+                    }
+                };
+                es.onerror = () => es.close();
+            };
+
+            useEffect(() => { fetchHistoryList(); }, []);
+            
+            useEffect(() => {
+                if (status === "complete" && result && window.Prism) {
+                    setTimeout(() => window.Prism.highlightAll(), 100);
+                }
+            }, [status, result]);
+
+            // Match side panels height to code panel so they end where code ends; side panels scroll if content overflows
+            useEffect(() => {
+                if (status !== "complete" || !result || !codePanelRef.current) return;
+                const measure = () => {
+                    if (codePanelRef.current) setSidePanelHeight(codePanelRef.current.offsetHeight);
+                };
+                measure();
+                const t = setTimeout(measure, 100);
+                const ro = new ResizeObserver(measure);
+                ro.observe(codePanelRef.current);
+                return () => { clearTimeout(t); ro.disconnect(); };
+            }, [status, result]);
+
+            return (
+                <div className="max-w-[1550px] mx-auto p-6 md:p-10 min-h-screen flex flex-col relative">
+                    {/* --- HISTORY SIDEBAR (PRESERVED) --- */}
+                    {showHistory && (
+                        <div className="fixed inset-0 z-50 flex justify-end">
+                            <div className="absolute inset-0 bg-black/60" onClick={() => setShowHistory(false)}></div>
+                            <div className="w-96 glass h-full border-l border-white/10 p-8 flex flex-col shadow-2xl">
+                                <div className="flex justify-between items-center mb-8">
+                                    <h2 className="text-xl font-bold text-cyan-400">Project History</h2>
+                                    <button onClick={() => setShowHistory(false)} className="text-slate-500 hover:text-white">✕</button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
+                                    {history.map((item, idx) => (
+                                        <div key={idx} onClick={() => loadFromHistory(item.file)} className="p-4 rounded-xl bg-white/5 border border-white/5 hover:border-cyan-500/50 cursor-pointer transition-all">
+                                            <p className="text-xs text-slate-500 font-mono mb-1">{item.time}</p>
+                                            <p className="text-sm font-bold truncate">{item.query}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <header className="flex justify-between items-center border-b border-white/5 pb-8 mb-8">
+                        <div>
+                            <h1 className="text-4xl font-bold italic bg-gradient-to-r from-cyan-400 to-emerald-400 bg-clip-text text-transparent text-glow">
+                                Agentic AI Developer Coach
+                            </h1>
+                            <p className="text-slate-500 text-xs mt-2 uppercase tracking-widest font-bold">Multi-Agent RAG Blueprinting System</p>
+                        </div>
+                        <div className="flex gap-4">
+                            <button onClick={() => setShowHistory(true)} className="px-6 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10">📜 HISTORY</button>
+                            <div className={`px-4 py-2 rounded-xl border text-[10px] font-bold ${status === 'thinking' ? 'border-cyan-500 text-cyan-500 animate-pulse' : 'border-slate-800 text-slate-500'}`}>
+                                SYSTEM: {status.toUpperCase()}
+                            </div>
+                        </div>
+                    </header>
+
+                    {status === "idle" && (
+                        <main className="flex-1 flex items-center justify-center relative">
+                            {/* background accents */}
+                            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                                <div className="absolute -top-24 -left-24 w-[420px] h-[420px] bg-cyan-500/10 blur-3xl rounded-full"></div>
+                                <div className="absolute -bottom-28 -right-28 w-[520px] h-[520px] bg-emerald-500/10 blur-3xl rounded-full"></div>
+                            </div>
+
+                            <div className="w-full max-w-6xl grid grid-cols-12 gap-6">
+                                {/* Main input */}
+                                <div className="col-span-12 lg:col-span-8 glass rounded-[2rem] p-10 shadow-2xl border-white/10">
+                                    <div className="flex items-start justify-between gap-6 mb-6">
+                                        <div>
+                                            <h2 className="text-2xl font-bold">Project Initialization</h2>
+                                            <p className="text-slate-500 text-sm mt-2">
+                                                Describe what you want. Use <span className="text-slate-300 font-mono">Ctrl/⌘ + Enter</span> to run.
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-4 bg-white/5 p-2 rounded-xl px-4">
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase">Persona</span>
+                                            <select className="bg-transparent text-sm text-cyan-400 font-bold outline-none cursor-pointer" value={expertise} onChange={(e) => setExpertise(e.target.value)}>
+                                                <option value="Intermediate">Intermediate Developer</option>
+                                                <option value="Senior">Senior / Architect</option>
+                                                <option value="Junior">Junior / Learning</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="relative">
+                                        <textarea
+                                            className="w-full bg-[#0a0f1d] border border-slate-800 rounded-2xl p-6 text-base md:text-lg focus:ring-2 ring-cyan-500 outline-none transition-all min-h-[280px] placeholder-slate-700 leading-relaxed"
+                                            placeholder={"Example:\n- Goal: build an inventory system\n- Constraints: Python, class-based, validation, unit tests\n- Output: architecture plan + code + walkthrough\n\nWrite yours here..."}
+                                            value={query}
+                                            onChange={(e) => setQuery(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") handleSubmit();
+                                            }}
+                                        />
+                                        <div className="absolute bottom-4 right-4 text-[10px] text-slate-600 font-mono">
+                                            {query.length} chars
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 mt-6">
+                                        <div className="flex flex-wrap gap-2">
+                                            {QUICK_STARTS.slice(0, 3).map((q) => (
+                                                <button
+                                                    key={q.title}
+                                                    onClick={() => applyQuickStart(q.prompt)}
+                                                    className="text-[11px] px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-cyan-500/40 transition-all"
+                                                    title={q.desc}
+                                                >
+                                                    {q.title}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <button
+                                            onClick={handleSubmit}
+                                            className="bg-cyan-600 hover:bg-cyan-500 px-10 py-4 rounded-2xl font-bold text-white shadow-lg transition-all"
+                                        >
+                                            Initialize Workflow
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Sidebar */}
+                                <div className="col-span-12 lg:col-span-4 glass rounded-[2rem] p-8 shadow-2xl border-white/10">
+                                    <h3 className="text-sm font-bold text-slate-200 mb-4">Quick Start Templates</h3>
+                                    <div className="space-y-3">
+                                        {QUICK_STARTS.map((q) => (
+                                            <button
+                                                key={q.title}
+                                                onClick={() => applyQuickStart(q.prompt)}
+                                                className="w-full text-left p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-emerald-500/30 transition-all"
+                                            >
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <span className="font-bold text-slate-100 text-sm">{q.title}</span>
+                                                    <span className="text-[10px] text-slate-500 font-mono">click to use</span>
+                                                </div>
+                                                <p className="text-xs text-slate-500 mt-2 leading-relaxed">{q.desc}</p>
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div className="mt-6 pt-6 border-t border-white/10">
+                                        <h3 className="text-sm font-bold text-slate-200 mb-3">Tips</h3>
+                                        <ul className="text-xs text-slate-500 space-y-2 leading-relaxed">
+                                            <li><span className="text-slate-300 font-semibold">Be specific:</span> language, framework, DB, constraints.</li>
+                                            <li><span className="text-slate-300 font-semibold">Ask for outputs:</span> plan + code + tests + run steps.</li>
+                                            <li><span className="text-slate-300 font-semibold">Include constraints:</span> “no new deps”, “Windows”, “offline”.</li>
+                                        </ul>
+                                        <button
+                                            onClick={() => setShowHistory(true)}
+                                            className="mt-5 w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold"
+                                        >
+                                            Browse History
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </main>
+                    )}
+
+                    {status !== "idle" && (
+                        <div className="flex justify-between items-center px-12 mb-12 relative">
+                            <div className="absolute top-1/2 left-0 w-full h-[1px] bg-slate-800 -z-10"></div>
+                            {AGENTS.map(agent => (
+                                <div key={agent.id} className={`flex flex-col items-center gap-3 p-5 rounded-2xl glass transition-all duration-700 ${activeAgent === agent.id ? "agent-active" : "opacity-20"}`}>
+                                    <span className="text-3xl">{agent.icon}</span>
+                                    <span className="text-[10px] font-bold uppercase tracking-tighter">{agent.label}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {status === "complete" && result && (
+                        <div className="flex flex-col gap-6 flex-1 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+                            {/* Summary */}
+                            {result.summary && String(result.summary).trim() && (
+                                <div className="glass rounded-3xl p-6 border border-white/10">
+                                    <div className="flex items-center justify-between gap-4">
+                                        <h3 className="text-amber-300 font-bold flex items-center gap-2">
+                                            🧾 SUMMARY
+                                        </h3>
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-[10px] text-slate-500 font-mono uppercase">TL;DR</span>
+                                            <button
+                                                onClick={() => setShowFullSummary(v => !v)}
+                                                className="text-[10px] px-3 py-1 rounded-md font-bold bg-white/5 border border-white/10 hover:bg-white/10"
+                                                title="Toggle full explanation"
+                                            >
+                                                {showFullSummary ? "SHOW LESS" : "SHOW MORE"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="prose prose-sm prose-invert mt-4">
+                                        <div
+                                            dangerouslySetInnerHTML={renderMarkdown(
+                                                showFullSummary
+                                                    ? (result.full_explanation || result.summary)
+                                                    : result.summary
+                                            )}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-12 gap-6 items-start">
+                            {/* Architecture Panel - height = code panel height; scroll when content overflows */}
+                            <div className="col-span-12 lg:col-span-3 glass rounded-3xl p-6 flex flex-col min-h-0 overflow-y-auto custom-scrollbar" style={sidePanelHeight ? { height: sidePanelHeight } : undefined}>
+                                <h3 className="text-cyan-400 font-bold mb-6 flex items-center gap-2 border-b border-white/5 pb-2 shrink-0">🏗️ ARCHITECTURE PLAN</h3>
+                                <div className="prose prose-sm prose-invert min-h-0">
+                                    <div
+                                        dangerouslySetInnerHTML={renderMarkdown(
+                                            result.architecture_plan || result.full_explanation || "Plan not found in response."
+                                        )}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Code Panel - height follows content; side panels match this height */}
+                            <div ref={codePanelRef} className="col-span-12 lg:col-span-6 glass rounded-3xl flex flex-col overflow-hidden shadow-2xl border-cyan-500/10">
+                                <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/5 shrink-0">
+                                    <span className="text-[10px] font-mono text-slate-500 uppercase">output_generated.{result.code_language}</span>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={downloadZip} className="text-[10px] bg-slate-800 px-3 py-1 rounded-md font-bold hover:bg-slate-700">DOWNLOAD ZIP</button>
+                                        <button onClick={() => { navigator.clipboard.writeText(result.final_code); alert('Copied!'); }} className="text-[10px] bg-slate-800 px-3 py-1 rounded-md font-bold hover:bg-slate-700">COPY</button>
+                                    </div>
+                                </div>
+                                <pre className="overflow-auto p-8 text-sm custom-scrollbar m-0 bg-transparent max-h-[75vh]">
+                                    <code className={`language-${result.code_language}`}>{result.final_code}</code>
+                                </pre>
+                            </div>
+
+                            {/* Coach Panel - height = code panel height; scroll when content overflows */}
+                                <div className="col-span-12 lg:col-span-3 glass rounded-3xl p-6 flex flex-col min-h-0 overflow-y-auto custom-scrollbar" style={sidePanelHeight ? { height: sidePanelHeight } : undefined}>
+                                <h3 className="text-emerald-400 font-bold mb-6 flex items-center gap-2 border-b border-white/5 pb-2 shrink-0">🎓 COACH WALKTHROUGH</h3>
+                                <div className="prose prose-sm prose-invert">
+                                    <div dangerouslySetInnerHTML={renderMarkdown(result.full_explanation || result.architecture_plan || "Coach details not found.")} />
+                                </div>
+                                <div className="mt-8 pt-8 border-t border-white/10 shrink-0">
+                                    <div className="flex justify-between items-center mb-6">
+                                        <span className="text-[10px] text-slate-500 font-bold uppercase">Logic Score</span>
+                                        <span className="text-cyan-400 font-bold text-xl">{result.review_score}/100</span>
+                                    </div>
+                                    <button onClick={() => { setStatus("idle"); setQuery(""); setResult(null); }} className="w-full bg-white/5 hover:bg-white/10 border border-white/10 py-3 rounded-xl text-xs font-bold transition-all uppercase tracking-widest">New Project</button>
+                                </div>
+                            </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+env/
+
+# Project Specific
+.env
+data/chroma_db/
+data/sessions/
+data/history/      # Add this to keep your local query history private
+!data/chroma_db/.gitkeep
+!data/sessions/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+node_modules/
+dist/
+build/
