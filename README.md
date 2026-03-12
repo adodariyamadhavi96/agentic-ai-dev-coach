@@ -87,55 +87,43 @@ ai-dev-coach/
 ├── main.py           # CLI entry point and server runner
 └── requirements.txt  # Pinned dependency manifest
 ```
+## 🧰 Setup Instructions
+1. **Clone & enter:** `git clone <repo-url> && cd ai-dev-coach`
+2. **Python env:** `python -m venv venv && source venv/bin/activate` (Windows: `venv\Scripts\activate`)
+3. **Install deps:** `pip install -r requirements.txt`
+4. **Configure env:** `cp .env.example .env` and fill `GEMINI_API_KEY` and `TAVILY_API_KEY`.
+5. **Initialize RAG:** `python scripts/setup_rag.py` (requires keys set; downloads and indexes docs).
+6. **Run tests (optional):** `pytest`.
 
-🧰 Setup & Execution
-Clone the Repository
+## ▶️ How to Run
+- **CLI:** `python main.py --query "Build a FastAPI CRUD app"`
+- **API:** `uvicorn api.main:app --reload`
+- **Frontend:** Start the API, then open `frontend/index.html` in your browser (or serve via simple HTTP server).
 
-```bash
-git clone <repo-url>
-cd ai-dev-coach
+## 🤝 Agent Workflow (ASCII Diagram)
+```
+[User]
+  |
+  v
+[User Proxy] --> captures intent
+  |
+  v
+[Architect + RAG] -- retrieves docs --> [Context]
+  |
+  v
+[Coder] ---> code draft ----> [Reviewer] ---(fail)-> back to [Coder]
+                                    |
+                                    v
+                               (pass/loops max)
+                                    |
+                                    v
+                                [Teacher]
+                                    |
+                                    v
+                                   [User]
 ```
 
-Environment Setup
-
-```bash
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-Configuration
-Create a `.env` file in the root directory:
-
-```
-GEMINI_API_KEY=your_api_key_here
-TAVILY_API_KEY=your_api_key_here
-MAX_REVIEW_LOOPS=3
-```
-
-Initialize RAG
-
-```bash
-python scripts/setup_rag.py
-```
-
-Launch
-
-```bash
-# Start Backend
-uvicorn main:app --reload
-
-# Start Frontend
-# Open frontend/index.html in your browser
-```
-
-🧪 Tech Stack
-Orchestration: LangGraph (Stateful Agent Workflows)
-
-LLM: Google Gemini-3.1-Flash
-
-Backend: FastAPI
-
-Frontend: React / Tailwind CSS
-
-Database: ChromaDB (Vector Search)
+## 🧪 Example Usage
+- **CLI:** `python main.py -q "Generate a Python function that sums a list safely"`
+- **API (curl):** `curl -X POST http://localhost:8000/v1/query -H "Content-Type: application/json" -d '{"query": "Explain dependency injection in FastAPI"}'`
+- **Frontend:** Enter a prompt like "Refactor this Flask app to FastAPI" and view Plan, Approved Code, and Explanation panels.
